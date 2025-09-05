@@ -32,7 +32,7 @@ variable "ECR_REGISTRY" {
 }
 
 variable "ECR_REPOSITORY" {
-    default = "alpine-linux-test"
+    default = "kinnontest/harnessbuild"
 }
 
 variable "PYTHON_GET_PIP_URL" {
