@@ -86,8 +86,8 @@ group "default" {
 
 target "image" {
   inherits = ["args", "docker-metadata-action"]
-  cache-to   = ["type=s3,region=us-east-2,bucket=kinnon-terra-sf,name=<+pipeline.identifier>,mode=max,access_key_id=<+pipeline.stages.PullOIDCCred.spec.execution.steps.ODICCredentialPull.output.outputVariables.AWS_ACCESS_KEY_ID>,secret_access_key=<+pipeline.stages.PullOIDCCred.spec.execution.steps.ODICCredentialPull.output.outputVariables.AWS_SECRET_ACCESS_KEY>,session_token=<+pipeline.stages.PullOIDCCred.spec.execution.steps.ODICCredentialPull.output.outputVariables.AWS_SESSION_TOKEN>"]
-  cache-from = ["type=s3,region=us-east-2,bucket=kinnon-terra-sf,name=<+pipeline.identifier>,access_key_id=<+pipeline.stages.PullOIDCCred.spec.execution.steps.ODICCredentialPull.output.outputVariables.AWS_ACCESS_KEY_ID>,secret_access_key=<+pipeline.stages.PullOIDCCred.spec.execution.steps.ODICCredentialPull.output.outputVariables.AWS_SECRET_ACCESS_KEY>,session_token=<+pipeline.stages.PullOIDCCred.spec.execution.steps.ODICCredentialPull.output.outputVariables.AWS_SESSION_TOKEN>"]
+  cache-to   = ["type=s3,bucket=${env.S3_BUCKET},region=${env.AWS_REGION},access_key_id=${env.AWS_ACCESS_KEY_ID},secret_access_key=${env.AWS_SECRET_ACCESS_KEY},session_token=${env.AWS_SESSION_TOKEN},mode=max"]
+  cache-from = ["type=s3,bucket=${env.S3_BUCKET},region=${env.AWS_REGION},access_key_id=${env.AWS_ACCESS_KEY_ID},secret_access_key=${env.AWS_SECRET_ACCESS_KEY},session_token=${env.AWS_SESSION_TOKEN}"]
 }
 
 target "image-local" {
