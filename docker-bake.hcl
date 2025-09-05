@@ -28,7 +28,7 @@ variable "ONBUILD_BASE_TAG" {
 }
 
 variable "ECR_REGISTRY" {
-    default = "979895001312.dkr.ecr.us-east-1.amazonaws.com"
+    default = "915632791698.dkr.ecr.us-east-2.amazonaws.com"
 }
 
 variable "ECR_REPOSITORY" {
