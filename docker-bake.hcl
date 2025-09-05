@@ -104,7 +104,7 @@ target "amd64" {
 
 // Special target: https://github.com/docker/metadata-action#bake-definition
 target "docker-metadata-action" {
-  tags = ["alpine-python:local"]
+  tags = ["kinnontest/harnessbuild:local"]
 }
 
 group "default" {
