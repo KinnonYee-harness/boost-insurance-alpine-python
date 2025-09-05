@@ -1,0 +1,30 @@
+ARG BASE_TAG
+ARG ECR_REGISTRY
+ARG ECR_REPOSITORY
+
+FROM ${ECR_REGISTRY}/${ECR_REPOSITORY}:${BASE_TAG}
+
+ENV PIP_ENV_VERSION 2023.7.23
+RUN apk add --no-cache gcc g++ linux-headers libffi-dev \
+    glib gcompat \
+    bash libstdc++ gobject-introspection-dev \
+    pkgconf
+    
+RUN pip install pipenv==$PIP_ENV_VERSION wheel setuptools
+
+ENV USER appuser
+RUN addgroup -S -g 1000 ${USER} && adduser -S -D -h /app -u 1000 -G ${USER} ${USER}
+
+WORKDIR /app
+
+ONBUILD COPY Pipfile Pipfile.lock ./
+
+ONBUILD ARG GEMFURY_TOKEN
+ONBUILD ARG PIPENV_DEV
+ONBUILD RUN pipenv install --system
+ONBUILD COPY . .
+
+ONBUILD ARG APP_VERSION
+ONBUILD ENV APP_VERSION ${APP_VERSION}
+ONBUILD RUN chown -R ${USER}:${USER} /app
+ONBUILD USER ${USER}

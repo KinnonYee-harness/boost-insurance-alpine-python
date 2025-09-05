@@ -1,0 +1,880 @@
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+  schedule:
+    - cron: 0 0 * * 0,3
+
+defaults:
+  run:
+    shell: 'bash -Eeuo pipefail -x {0}'
+
+permissions: write-all
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+env:
+  # Setting an environment variable with the value of a configuration variable
+  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  SLACK_CHANNEL: '#infrastructure_alerts'
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REGISTRY: "979895001312.dkr.ecr.us-east-1.amazonaws.com"
+  ECR_REPOSITORY: ${{ github.event.repository.name }}
+  GHCR_SLUG: ghcr.io/boost-insurance/${{ github.event.repository.name }}
+  PYTHON_VERSIONS: '["3.9","3.10","3.11","3.12"]'
+jobs:
+  debug:
+    name: Debug
+    secrets: inherit
+    uses: boost-insurance/github-actions-pipelines/.github/workflows/common-debug.yaml@v1.12
+  prepare:
+    name: Get Platforms
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.platforms.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: platforms
+        run: |
+          echo "matrix=$(docker buildx bake image-all --print | jq -cr '.target."image-all".platforms')" >> $GITHUB_OUTPUT
+      - name: Show Matrix
+        run: |
+          echo "${{ steps.platforms.outputs.matrix }}"
+      - id: versions
+        run: |
+          echo "versions=${{ env.PYTHON_VERSIONS }}" >> $GITHUB_OUTPUT
+  
+  build-arm:
+    name: Build Base Python Containers
+    runs-on: linux-arm64-runner
+    needs: 
+      - prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["3.9","3.10","3.11","3.12"]
+        platform: ["linux/arm64"]
+    steps:
+      - name: Install Docker
+        run: |
+          # Add Docker's official GPG key:
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl jq awscli
+          sudo install -m 0755 -d /etc/apt/keyrings
+          sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+          # Add the repository to Apt sources:
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+          # Install Docker
+          sudo apt-get update
+          sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+          # Give the current user permission to run docker without sudo
+          sudo usermod -aG docker $USER
+          sudo apt-get install -y acl
+          sudo setfacl --modify user:$USER:rw /var/run/docker.sock
+
+      - name: Prepare
+        id: platform_pair
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_OUTPUT
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::979895001312:role/github_actions-role
+          aws-region: ${{ env.AWS_REGION }}
+      - name: AWS sts get caller
+        id: aws_sts_get_caller
+        run: |
+          aws sts get-caller-identity
+      - name: Login to AWS ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          mask-password: 'true'
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: "--debug"
+      - uses: actions/checkout@v4
+      - id: python-version
+        run: echo "version=$(cat ${{matrix.version }}.hcl | awk -F '=' '/^PYTHON_VERSION/{print $2}' | tr -d '"')" >> $GITHUB_OUTPUT
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to AWS ECR
+        if: github.event_name != 'pull_request'
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          mask-password: true
+      - name: Generate container metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+            ${{ env.GHCR_SLUG }}
+          tags: |
+            type=match,pattern=(.*)-r,group=1
+            type=ref,event=pr
+            type=edge
+            type=semver,pattern={{version}},value=${{ steps.python-version.outputs.version }}
+            type=raw,${{ matrix.version }}
+          labels: |
+            org.opencontainers.image.title=${{ github.event.repository.name }}
+            org.opencontainers.image.vendor=Boost Insurance
+      - name: Rename meta bake definition file
+        run: |
+          mv "${{ steps.meta.outputs.bake-file }}" "/tmp/bake-meta.json"
+      - name: Upload meta bake definition
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.version }}-bake-meta
+          path: /tmp/bake-meta.json
+          if-no-files-found: error
+          overwrite: true
+      - name: Build
+        id: bake
+        uses: docker/bake-action@v5
+        with:
+          files: |
+            ./docker-bake.hcl
+            ${{ matrix.version }}.hcl
+            /tmp/bake-meta.json
+          targets: image
+          set: |
+            *.tags=
+            *.platform=${{ matrix.platform }}
+            *.cache-from=type=gha,scope=build-${{ steps.platform_pair.outputs.PLATFORM_PAIR }}-${{ matrix.version }}
+            *.cache-to=type=gha,scope=build-${{ steps.platform_pair.outputs.PLATFORM_PAIR }}-${{ matrix.version }}
+            *.output=type=image,"name=${{ env.ECR_SLUG}},${{ env.GHCR_SLUG }}",push-by-digest=true,push=${{ github.event_name != 'pull_request' }}
+        env:
+            ECR_SLUG: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+            PLATFORM_PAIR: ${{ env.PLATFORM_PAIR }}
+      - name: Export digest
+        id: export
+        run: |
+          mkdir -p /tmp/digests
+          digest="$(echo '${{ steps.bake.outputs.metadata }}' | jq -r '.image."containerimage.digest"')"
+          touch "/tmp/digests/${digest#sha256:}"
+          ls -l /tmp/digests # troubleshooting listing the digests
+          echo "digest=${digest#sha256:}" >> $GITHUB_OUTPUT
+      - name: Upload digest
+        #uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
+        with:
+          #name: ${{ matrix.version }}-digests
+          name: ${{ matrix.version }}-arm-digest
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+      - uses: act10ns/slack@v2  # send slack message
+        if: failure()
+        with:
+          message: |
+            Docker Image *${{ job.name }}* 
+            ${{ job.status }} - ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          status: ${{ job.status }}
+          channel: ${{ env.SLACK_CHANNEL }}
+
+  build-amd64:
+    name: Build Base Python Containers
+    runs-on: ubuntu-latest
+    needs: 
+      - prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        version:  ["3.9","3.10","3.11","3.12"]
+        platform: ["linux/amd64"]
+    steps:
+      - name: Prepare
+        id: platform_pair
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_OUTPUT
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::979895001312:role/github_actions-role
+          aws-region: ${{ env.AWS_REGION }}
+      - name: AWS sts get caller
+        id: aws_sts_get_caller
+        run: |
+          aws sts get-caller-identity
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: "--debug"
+      - uses: actions/checkout@v4
+      - id: python-version
+        run: echo "version=$(cat ${{matrix.version }}.hcl | awk -F '=' '/^PYTHON_VERSION/{print $2}' | tr -d '"')" >> $GITHUB_OUTPUT
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to AWS ECR
+        if: github.event_name != 'pull_request'
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          mask-password: true
+      - name: Generate container metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+            ${{ env.GHCR_SLUG }}
+          tags: |
+            type=match,pattern=(.*)-r,group=1
+            type=ref,event=pr
+            type=edge
+            type=semver,pattern={{version}},value=${{ steps.python-version.outputs.version }}
+            type=raw,${{ matrix.version }}
+          labels: |
+            org.opencontainers.image.title=${{ github.event.repository.name }}
+            org.opencontainers.image.vendor=Boost Insurance
+      - name: Rename meta bake definition file
+        run: |
+          mv "${{ steps.meta.outputs.bake-file }}" "/tmp/bake-meta.json"
+      - name: Upload meta bake definition
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.version }}-bake-meta
+          path: /tmp/bake-meta.json
+          if-no-files-found: error
+          overwrite: true
+      - name: Build
+        id: bake
+        uses: docker/bake-action@v5
+        with:
+          files: |
+            ./docker-bake.hcl
+            ${{ matrix.version }}.hcl
+            /tmp/bake-meta.json
+          targets: image
+          set: |
+            *.tags=
+            *.platform=${{ matrix.platform }}
+            *.cache-from=type=gha,scope=build-${{ steps.platform_pair.outputs.PLATFORM_PAIR }}-${{ matrix.version }}
+            *.cache-to=type=gha,scope=build-${{ steps.platform_pair.outputs.PLATFORM_PAIR }}-${{ matrix.version }}
+            *.output=type=image,"name=${{ env.ECR_SLUG}},${{ env.GHCR_SLUG }}",push-by-digest=true,push=${{ github.event_name != 'pull_request' }}
+        env:
+            ECR_SLUG: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+            PLATFORM_PAIR: ${{ env.PLATFORM_PAIR }}
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="$(echo '${{ steps.bake.outputs.metadata }}' | jq -r '.image."containerimage.digest"')"
+          touch "/tmp/digests/${digest#sha256:}"
+          ls -l /tmp/digests # troubleshooting listing the digests
+      - name: Upload digest
+        #uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
+        with:
+          #name: ${{ matrix.version }}-digests
+          name: ${{ matrix.version }}-amd64-digest
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+      - uses: act10ns/slack@v2  # send slack message
+        if: failure()
+        with:
+          message: |
+            Docker Image *${{ job.name }}* 
+            ${{ job.status }} - ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          status: ${{ job.status }}
+          channel: ${{ env.SLACK_CHANNEL }}
+
+  merge-digest:
+    name: Merge Digest base containers 
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        version:  ["3.9","3.10","3.11","3.12"]
+    needs:
+      - build-arm
+      - build-amd64
+    steps:
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: ${{ matrix.version }}-digests
+          pattern: ${{ matrix.version }}-*-digest 
+      - uses: act10ns/slack@v2  # send slack message
+        if: failure()
+        with:
+          message: |
+            Docker Image *${{ job.name }}* 
+            ${{ job.status }} - ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          status: ${{ job.status }}
+          channel: ${{ env.SLACK_CHANNEL }}
+      - uses: act10ns/slack@v2  # send slack message
+        if: failure()
+        with:
+          message: |
+            Docker Image *${{ job.name }}* 
+            ${{ job.status }} - ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          status: ${{ job.status }}
+          channel: ${{ env.SLACK_CHANNEL }}
+  
+  merge:
+    name: Merge Base Python Containers
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        version:  ["3.9","3.10","3.11","3.12"]
+    needs:
+      #- build-arm
+      #- build-amd64
+      - merge-digest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::979895001312:role/github_actions-role
+          aws-region: ${{ env.AWS_REGION }}
+      - name: AWS sts get caller
+        id: aws_sts_get_caller
+        run: |
+          aws sts get-caller-identity
+      - name: Download meta bake definition
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.version}}-bake-meta
+          path: /tmp/bake-meta
+      - name: Move meta bake definition
+        run: mv /tmp/bake-meta/bake-meta.json /tmp/bake-meta.json
+      - name: Download Digests
+        #uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
+        id: digests
+        with:
+          name: ${{ matrix.version }}-digests
+          path: /tmp/digests
+      - name: Login GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          mask-password: true
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          jq -r . /tmp/bake-meta.json
+          docker buildx imagetools create $(jq -cr '.target."docker-metadata-action".tags | map(select(startswith("${{ env.ECR_SLUG }}")) | "-t " + .) | join(" ")' /tmp/bake-meta.json) \
+            $(printf '${{ env.ECR_SLUG }}@sha256:%s ' *)
+          docker buildx imagetools create $(jq -cr '.target."docker-metadata-action".tags | map(select(startswith("${{ env.GHCR_SLUG }}")) | "-t " + .) | join(" ")' /tmp/bake-meta.json) \
+            $(printf '${{ env.GHCR_SLUG }}@sha256:%s ' *)
+        env:
+            ECR_SLUG: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+      - name: Inspect image
+        run: |
+          tag=$(jq -r '.target."docker-metadata-action".args.DOCKER_META_VERSION' /tmp/bake-meta.json)
+          docker buildx imagetools inspect ${{ env.ECR_SLUG }}:${tag}
+          docker buildx imagetools inspect ${{ env.GHCR_SLUG }}:${tag}
+        env:
+          ECR_SLUG: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+      - uses: act10ns/slack@v2  # send slack message
+        if: failure()
+        with:
+          message: |
+            Docker Image *${{ job.name }}* 
+            ${{ job.status }} - ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          status: ${{ job.status }}
+          channel: ${{ env.SLACK_CHANNEL }}
+
+  onbuild:
+    name: Build Onbuild Python Containers
+    runs-on: linux-arm64-runner
+    needs: 
+      - merge
+      - prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        version:  ["3.9","3.10","3.11","3.12"]
+        platform: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Install Docker
+        run: |
+          # Add Docker's official GPG key:
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl jq awscli
+          sudo install -m 0755 -d /etc/apt/keyrings
+          sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+          # Add the repository to Apt sources:
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+          # Install Docker
+          sudo apt-get update
+          sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+          # Give the current user permission to run docker without sudo
+          sudo usermod -aG docker $USER
+          sudo apt-get install -y acl
+          sudo setfacl --modify user:$USER:rw /var/run/docker.sock
+      - name: Prepare
+        id: platform_pair
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_OUTPUT
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::979895001312:role/github_actions-role
+          aws-region: ${{ env.AWS_REGION }}
+      - name: AWS sts get caller
+        id: aws_sts_get_caller
+        run: |
+          aws sts get-caller-identity
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: "--debug"
+      - uses: actions/checkout@v4
+      - id: python-version
+        run: echo "version=$(cat ${{matrix.version }}.hcl | awk -F '=' '/^PYTHON_VERSION/{print $2}' | tr -d '"')" >> $GITHUB_OUTPUT
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to AWS ECR
+        if: github.event_name != 'pull_request'
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          mask-password: true
+      - name: Generate container metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+            ${{ env.GHCR_SLUG }}
+          tags: |
+            type=match,pattern=(.*)-r,group=1
+            type=ref,event=pr
+            type=edge
+            type=semver,pattern={{version}},value=${{ steps.python-version.outputs.version }}-onbuild
+            type=raw,${{ matrix.version }}-onbuild
+          labels: |
+            org.opencontainers.image.title=${{ github.event.repository.name }}
+            org.opencontainers.image.vendor=Boost Insurance
+      - name: Rename meta bake definition file
+        run: |
+          mv "${{ steps.meta.outputs.bake-file }}" "/tmp/bake-meta.json"
+      - name: Upload meta bake definition
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.version }}-onbuild-bake-meta
+          path: /tmp/bake-meta.json
+          if-no-files-found: error
+          overwrite: true
+      - name: Build
+        id: bake
+        uses: docker/bake-action@v5
+        with:
+          files: |
+            ./docker-bake.hcl
+            ${{ matrix.version }}.hcl
+            /tmp/bake-meta.json
+          targets: onbuild
+          set: |
+            *.tags=
+            *.platform=${{ matrix.platform }}
+            *.cache-from=type=gha,scope=onbuild-poetry-${{ steps.platform_pair.outputs.PLATFORM_PAIR }}-${{ matrix.version }}
+            *.cache-to=type=gha,scope=onbuild-poetry-${{ steps.platform_pair.outputs.PLATFORM_PAIR }}-${{ matrix.version }}
+            *.output=type=image,"name=${{ env.ECR_SLUG}},${{ env.GHCR_SLUG }}",push-by-digest=true,push=${{ github.event_name != 'pull_request' }}
+        env:
+            ECR_SLUG: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+            PLATFORM_PAIR: ${{ env.PLATFORM_PAIR }}
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="$(echo '${{ steps.bake.outputs.metadata }}' | jq -r '.onbuild."containerimage.digest"')"
+          touch "/tmp/digests/${digest#sha256:}"
+          ls -l /tmp/digests/ # troubleshooting listing the digests
+      - name: Upload digest
+        #uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
+        with:
+          #name: ${{ matrix.version }}-onbuild-digests
+          name: ${{ matrix.version }}-${{ steps.platform_pair.outputs.PLATFORM_PAIR }}-onbuild-digest
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+      - uses: act10ns/slack@v2  # send slack message
+        if: failure()
+        with:
+          message: |
+            Docker Image *${{ job.name }}* 
+            ${{ job.status }} - ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          status: ${{ job.status }}
+          channel: ${{ env.SLACK_CHANNEL }}
+
+  merge-onbuild-digest:                                                                                                                                         
+    name: Merge Digest onbuild containers
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        version:  ["3.9","3.10","3.11","3.12"]
+    needs:
+      - onbuild
+    steps:
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: ${{ matrix.version }}-onbuild-digests
+          pattern: ${{ matrix.version }}-*-onbuild-digest
+      - uses: act10ns/slack@v2  # send slack message
+        if: failure()
+        with:
+          message: |
+            Docker Image *${{ job.name }}* 
+            ${{ job.status }} - ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          status: ${{ job.status }}
+          channel: ${{ env.SLACK_CHANNEL }}
+
+  onbuild-merge:
+    name: Merge Onbuild Python Containers
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        version:  ["3.9","3.10","3.11","3.12"]
+    needs:
+      #- onbuild
+      - merge-onbuild-digest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::979895001312:role/github_actions-role
+          aws-region: ${{ env.AWS_REGION }}
+      - name: AWS sts get caller
+        id: aws_sts_get_caller
+        run: |
+          aws sts get-caller-identity
+      - name: Download meta bake definition
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.version}}-onbuild-bake-meta
+          path: /tmp/bake-meta
+      - name: Move meta bake definition
+        run: mv /tmp/bake-meta/bake-meta.json /tmp/bake-meta.json
+      - name: Download Digests
+        #uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
+        id: digests
+        with:
+          name: ${{ matrix.version }}-onbuild-digests
+          path: /tmp/digests
+      - name: Login GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          mask-password: true
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          jq -r . /tmp/bake-meta.json
+          docker buildx imagetools create $(jq -cr '.target."docker-metadata-action".tags | map(select(startswith("${{ env.ECR_SLUG }}")) | "-t " + .) | join(" ")' /tmp/bake-meta.json) \
+            $(printf '${{ env.ECR_SLUG }}@sha256:%s ' *)
+          docker buildx imagetools create $(jq -cr '.target."docker-metadata-action".tags | map(select(startswith("${{ env.GHCR_SLUG }}")) | "-t " + .) | join(" ")' /tmp/bake-meta.json) \
+            $(printf '${{ env.GHCR_SLUG }}@sha256:%s ' *)
+        env:
+            ECR_SLUG: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+      - name: Inspect image
+        run: |
+          tag=$(jq -r '.target."docker-metadata-action".args.DOCKER_META_VERSION' /tmp/bake-meta.json)
+          docker buildx imagetools inspect ${{ env.ECR_SLUG }}:${tag}
+          docker buildx imagetools inspect ${{ env.GHCR_SLUG }}:${tag}
+        env:
+          ECR_SLUG: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+      - uses: act10ns/slack@v2  # send slack message
+        if: failure()
+        with:
+          message: |
+            Docker Image *${{ job.name }}* 
+            ${{ job.status }} - ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          status: ${{ job.status }}
+          channel: ${{ env.SLACK_CHANNEL }}
+
+  onbuild-poetry:
+    name: Build Onbuild Poetry Python Containers
+    runs-on: linux-arm64-runner
+    needs: 
+      - merge
+      - prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        version:  ["3.9","3.10","3.11","3.12"]
+        platform: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Install Docker
+        run: |
+          # Add Docker's official GPG key:
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl jq awscli
+          sudo install -m 0755 -d /etc/apt/keyrings
+          sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+          # Add the repository to Apt sources:
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+          # Install Docker
+          sudo apt-get update
+          sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+          # Give the current user permission to run docker without sudo
+          sudo usermod -aG docker $USER
+          sudo apt-get install -y acl
+          sudo setfacl --modify user:$USER:rw /var/run/docker.sock
+      - name: Prepare
+        id: platform_pair
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_OUTPUT
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::979895001312:role/github_actions-role
+          aws-region: ${{ env.AWS_REGION }}
+      - name: AWS sts get caller
+        id: aws_sts_get_caller
+        run: |
+          aws sts get-caller-identity
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: "--debug"
+      - uses: actions/checkout@v4
+      - id: python-version
+        run: echo "version=$(cat ${{matrix.version }}.hcl | awk -F '=' '/^PYTHON_VERSION/{print $2}' | tr -d '"')" >> $GITHUB_OUTPUT
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to AWS ECR
+        if: github.event_name != 'pull_request'
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          mask-password: true
+      - name: Generate container metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+            ${{ env.GHCR_SLUG }}
+          tags: |
+            type=match,pattern=(.*)-r,group=1
+            type=ref,event=pr
+            type=edge
+            type=semver,pattern={{version}},value=${{ steps.python-version.outputs.version }}-onbuild-poetry
+            type=raw,${{ matrix.version }}-onbuild-poetry
+          labels: |
+            org.opencontainers.image.title=${{ github.event.repository.name }}
+            org.opencontainers.image.vendor=Boost Insurance
+      - name: Rename meta bake definition file
+        run: |
+          mv "${{ steps.meta.outputs.bake-file }}" "/tmp/bake-meta.json"
+      - name: Upload meta bake definition
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.version }}-onbuild-poetry-bake-meta
+          path: /tmp/bake-meta.json
+          if-no-files-found: error
+          overwrite: true
+      - name: Build
+        id: bake
+        uses: docker/bake-action@v5
+        with:
+          files: |
+            ./docker-bake.hcl
+            ${{ matrix.version }}.hcl
+            /tmp/bake-meta.json
+          targets: onbuild-poetry
+          set: |
+            *.tags=
+            *.platform=${{ matrix.platform }}
+            *.cache-from=type=gha,scope=onbuild-${{ steps.platform_pair.outputs.PLATFORM_PAIR }}-${{ matrix.version }}
+            *.cache-to=type=gha,scope=onbuild-${{ steps.platform_pair.outputs.PLATFORM_PAIR }}-${{ matrix.version }}
+            *.output=type=image,"name=${{ env.ECR_SLUG}},${{ env.GHCR_SLUG }}",push-by-digest=true,push=${{ github.event_name != 'pull_request' }}
+        env:
+            ECR_SLUG: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+            PLATFORM_PAIR: ${{ env.PLATFORM_PAIR }}
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="$(echo '${{ steps.bake.outputs.metadata }}' | jq -r '."onbuild-poetry"."containerimage.digest"')"
+          touch "/tmp/digests/${digest#sha256:}"
+          ls -l /tmp/digests # troubleshooting listing the digests
+      - name: Upload digest
+        #uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
+        with:
+          #name: ${{ matrix.version }}-onbuild-poetry-digests
+          name: ${{ matrix.version }}-${{ steps.platform_pair.outputs.PLATFORM_PAIR }}-onbuild-poetry-digest
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+      - uses: act10ns/slack@v2  # send slack message
+        if: failure()
+        with:
+          message: |
+            Docker Image *${{ job.name }}* 
+            ${{ job.status }} - ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          status: ${{ job.status }}
+          channel: ${{ env.SLACK_CHANNEL }}
+
+  merge-onbuild-poetry-digest:                                                                                                                                         
+    name: Merge Digest onbuild poetry containers
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        version:  ["3.9","3.10","3.11","3.12"]
+    needs:
+      - onbuild-poetry
+    steps:
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: ${{ matrix.version }}-onbuild-poetry-digests
+          pattern: ${{ matrix.version }}-*-onbuild-poetry-digest
+      - uses: act10ns/slack@v2  # send slack message
+        if: failure()
+        with:
+          message: |
+            Docker Image *${{ job.name }}* 
+            ${{ job.status }} - ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          status: ${{ job.status }}
+          channel: ${{ env.SLACK_CHANNEL }}
+
+  onbuild-poetry-merge:
+    name: Merge Onbuild Poetry Python Containers
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        version:  ["3.9","3.10","3.11","3.12"]
+    needs:
+      #- onbuild-poetry
+      - merge-onbuild-poetry-digest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::979895001312:role/github_actions-role
+          aws-region: ${{ env.AWS_REGION }}
+      - name: AWS sts get caller
+        id: aws_sts_get_caller
+        run: |
+          aws sts get-caller-identity
+      - name: Download meta bake definition
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.version}}-onbuild-poetry-bake-meta
+          path: /tmp/bake-meta
+      - name: Move meta bake definition
+        run: mv /tmp/bake-meta/bake-meta.json /tmp/bake-meta.json
+      - name: Download Digests
+        #uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
+        id: digests
+        with:
+          name: ${{ matrix.version }}-onbuild-poetry-digests
+          path: /tmp/digests
+      - name: Login GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          mask-password: true
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          jq -r . /tmp/bake-meta.json
+          docker buildx imagetools create $(jq -cr '.target."docker-metadata-action".tags | map(select(startswith("${{ env.ECR_SLUG }}")) | "-t " + .) | join(" ")' /tmp/bake-meta.json) \
+            $(printf '${{ env.ECR_SLUG }}@sha256:%s ' *)
+          docker buildx imagetools create $(jq -cr '.target."docker-metadata-action".tags | map(select(startswith("${{ env.GHCR_SLUG }}")) | "-t " + .) | join(" ")' /tmp/bake-meta.json) \
+            $(printf '${{ env.GHCR_SLUG }}@sha256:%s ' *)
+        env:
+            ECR_SLUG: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+      - name: Inspect image
+        run: |
+          tag=$(jq -r '.target."docker-metadata-action".args.DOCKER_META_VERSION' /tmp/bake-meta.json)
+          docker buildx imagetools inspect ${{ env.ECR_SLUG }}:${tag}
+          docker buildx imagetools inspect ${{ env.GHCR_SLUG }}:${tag}
+        env:
+          ECR_SLUG: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+      - uses: act10ns/slack@v2  # send slack message
+        if: failure()
+        with:
+          message: |
+            Docker Image *${{ job.name }}* 
+            ${{ job.status }} - ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          status: ${{ job.status }}
+          channel: ${{ env.SLACK_CHANNEL }}
+
