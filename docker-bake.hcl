@@ -46,7 +46,7 @@ variable "PYTHON_GET_PIP_SHA256" {
 }
 
 variable "ONBUILD_BASE_TAG" {
-    default = "3.9"
+    default = "alpine"
 }
 
 variable "ECR_REGISTRY" {
