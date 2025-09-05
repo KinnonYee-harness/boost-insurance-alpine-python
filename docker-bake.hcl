@@ -35,6 +35,12 @@ variable "ECR_REPOSITORY" {
     default = "kinnontest/harnessbuild"
 }
 
+variable "S3_BUCKET" {}
+variable "AWS_REGION" {}
+variable "AWS_ACCESS_KEY_ID" {}
+variable "AWS_SECRET_ACCESS_KEY" {}
+variable "AWS_SESSION_TOKEN" {}
+
 variable "PYTHON_GET_PIP_URL" {
     default = "https://github.com/pypa/get-pip/raw/9af82b715db434abb94a0a6f3569f43e72157346/public/get-pip.py"
 }
@@ -86,8 +92,8 @@ group "default" {
 
 target "image" {
   inherits = ["args", "docker-metadata-action"]
-  cache-to   = ["type=s3,bucket=${S3_BUCKET},region=${AWS_REGION},access_key_id=${AWS_ACCESS_KEY_ID},secret_access_key=${AWS_SECRET_ACCESS_KEY},session_token=${AWS_SESSION_TOKEN},mode=max"]
-  cache-from = ["type=s3,bucket=${S3_BUCKET},region=${AWS_REGION},access_key_id=${AWS_ACCESS_KEY_ID},secret_access_key=${AWS_SECRET_ACCESS_KEY},session_token=${AWS_SESSION_TOKEN}"]
+  cache-to   = ["type=s3,bucket=${var.S3_BUCKET},region=${var.AWS_REGION},access_key_id=${var.AWS_ACCESS_KEY_ID},secret_access_key=${var.AWS_SECRET_ACCESS_KEY},session_token=${var.AWS_SESSION_TOKEN},mode=max"]
+  cache-from = ["type=s3,bucket=${var.S3_BUCKET},region=${var.AWS_REGION},access_key_id=${var.AWS_ACCESS_KEY_ID},secret_access_key=${var.AWS_SECRET_ACCESS_KEY},session_token=${var.AWS_SESSION_TOKEN}"]
 }
 
 target "image-local" {
