@@ -35,11 +35,21 @@ variable "ECR_REPOSITORY" {
     default = "kinnontest/harnessbuild"
 }
 
-variable "S3_BUCKET" {}
-variable "AWS_REGION" {}
-variable "AWS_ACCESS_KEY_ID" {}
-variable "AWS_SECRET_ACCESS_KEY" {}
-variable "AWS_SESSION_TOKEN" {}
+variable "S3_BUCKET" {
+    default = ${S3_BUCKET}
+}
+variable "AWS_REGION" {
+    default = ${AWS_REGION}
+}
+variable "AWS_ACCESS_KEY_ID" {
+    default = ${AWS_ACCESS_KEY_ID}
+}
+variable "AWS_SECRET_ACCESS_KEY" {
+    default = ${AWS_SECRET_ACCESS_KEY}
+}
+variable "AWS_SESSION_TOKEN" {
+    default = ${AWS_SESSION_TOKEN}
+}
 
 variable "PYTHON_GET_PIP_URL" {
     default = "https://github.com/pypa/get-pip/raw/9af82b715db434abb94a0a6f3569f43e72157346/public/get-pip.py"
