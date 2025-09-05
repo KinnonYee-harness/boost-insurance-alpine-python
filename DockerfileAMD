@@ -162,4 +162,18 @@ RUN set -eux; \
 RUN apk update && apk upgrade --no-cache && apk add --no-cache gcc musl-dev libffi-dev curl
 RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir wheel setuptools
 
+RUN mkdir -p /etc/ssl/rds/us-west-2 && \
+	wget -q -O /etc/ssl/rds/us-west-2/rds-combined-ca-bundle.pem https://truststore.pki.rds.amazonaws.com/us-west-2/us-west-2-bundle.pem
+
+RUN mkdir -p /etc/ssl/us-east-1/ && \
+	wget -q -O /etc/ssl/us-east-1/rds-combined-ca-bundle.pem https://truststore.pki.rds.amazonaws.com/us-east-1/us-east-1-bundle.pem
+
+RUN mkdir -p /etc/ssl/rds/us-east-2 && \
+	wget -q -O /etc/ssl/rds/us-east-2/rds-combined-ca-bundle.pem https://truststore.pki.rds.amazonaws.com/us-east-2/us-east-2-bundle.pem
+
+RUN mkdir -p /etc/ssl/rds/global/ && \
+	wget -q -O /etc/ssl/rds/global/global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+
+RUN ln -s /etc/ssl/rds/global/global-bundle.pem /etc/ssl/rds-combined-ca-bundle.pem
+
 CMD ["python3"]
