@@ -33,7 +33,7 @@ variable "PYTHON_GET_PIP_SHA256" {
 
 // variable "ECR_REPOSITORY" {
 //     default = "alpine-linux-test"
-/}
+// }
 
 
 variable "ONBUILD_BASE_TAG" {
