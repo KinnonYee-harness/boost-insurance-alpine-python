@@ -89,16 +89,11 @@ group "default" {
   targets = ["image-local", "onbuild-local", "onbuild-poetry-local"]
 }
 
-// Direct access to environment variables for cache configuration
-function "env" {
-  params = [name]
-  result = "${" + name + "}"
-}
-
 target "image" {
   inherits = ["args", "docker-metadata-action"]
-  cache-to   = ["type=s3,bucket=" + env("S3_BUCKET") + ",region=" + env("AWS_REGION") + ",access_key_id=" + env("AWS_ACCESS_KEY_ID") + ",secret_access_key=" + env("AWS_SECRET_ACCESS_KEY") + ",session_token=" + env("AWS_SESSION_TOKEN") + ",mode=max"]
-  cache-from = ["type=s3,bucket=" + env("S3_BUCKET") + ",region=" + env("AWS_REGION") + ",access_key_id=" + env("AWS_ACCESS_KEY_ID") + ",secret_access_key=" + env("AWS_SECRET_ACCESS_KEY") + ",session_token=" + env("AWS_SESSION_TOKEN")]
+  // Use direct environment variable references in raw format
+  cache-to   = ["type=s3,bucket=$S3_BUCKET,region=$AWS_REGION,access_key_id=$AWS_ACCESS_KEY_ID,secret_access_key=$AWS_SECRET_ACCESS_KEY,session_token=$AWS_SESSION_TOKEN,mode=max"]
+  cache-from = ["type=s3,bucket=$S3_BUCKET,region=$AWS_REGION,access_key_id=$AWS_ACCESS_KEY_ID,secret_access_key=$AWS_SECRET_ACCESS_KEY,session_token=$AWS_SESSION_TOKEN"]
 }
 
 target "image-local" {
