@@ -39,6 +39,27 @@ variable "GHCR_SLUG" {
   default = "ghcr.io/KinnonYee-harness/bst-exmpl"
 }
 
+// AWS S3 Cache variables
+variable "S3_BUCKET" {
+  default = ""
+}
+
+variable "AWS_REGION" {
+  default = ""
+}
+
+variable "AWS_ACCESS_KEY_ID" {
+  default = ""
+}
+
+variable "AWS_SECRET_ACCESS_KEY" {
+  default = ""
+}
+
+variable "AWS_SESSION_TOKEN" {
+  default = ""
+}
+
 
 variable "PYTHON_GET_PIP_URL" {
     default = "https://github.com/pypa/get-pip/raw/9af82b715db434abb94a0a6f3569f43e72157346/public/get-pip.py"
