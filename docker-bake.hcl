@@ -24,7 +24,7 @@ variable "PYTHON_GET_PIP_SHA256" {
 }
 
 variable "ONBUILD_BASE_TAG" {
-    default = "alpine"
+    default = "3.9"
 }
 
 variable "ECR_REGISTRY" {
@@ -33,10 +33,6 @@ variable "ECR_REGISTRY" {
 
 variable "ECR_REPOSITORY" {
     default = "kinnontest/harnessbuild"
-}
-
-variable "GHCR_SLUG" {
-  default = "ghcr.io/KinnonYee-harness/bst-exmpl"
 }
 
 // AWS S3 Cache variables
