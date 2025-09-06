@@ -28,12 +28,20 @@ variable "ONBUILD_BASE_TAG" {
 }
 
 variable "ECR_REGISTRY" {
-    default = "915632791698.dkr.ecr.us-east-2.amazonaws.com"
+    default = "979895001312.dkr.ecr.us-east-1.amazonaws.com"
 }
 
 variable "ECR_REPOSITORY" {
-    default = "kinnontest/harnessbuild"
+    default = "alpine-linux-test"
 }
+
+// variable "ECR_REGISTRY" {
+//    default = "915632791698.dkr.ecr.us-east-2.amazonaws.com"
+// }
+
+// variable "ECR_REPOSITORY" {
+//     default = "kinnontest/harnessbuild"
+// }
 
 // AWS S3 Cache variables
 variable "S3_BUCKET" {
