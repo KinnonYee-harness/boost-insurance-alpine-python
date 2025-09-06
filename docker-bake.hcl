@@ -23,25 +23,30 @@ variable "PYTHON_GET_PIP_SHA256" {
     default = "45a2bb8bf2bb5eff16fdd00faef6f29731831c7c59bd9fc2bf1f3bed511ff1fe"
 }
 
-variable "ONBUILD_BASE_TAG" {
-    default = "3.9"
-}
-
-variable "ECR_REGISTRY" {
-    default = "979895001312.dkr.ecr.us-east-1.amazonaws.com"
-}
-
-variable "ECR_REPOSITORY" {
-    default = "alpine-linux-test"
-}
+// variable "ONBUILD_BASE_TAG" {
+//     default = "3.9"
+// }
 
 // variable "ECR_REGISTRY" {
-//    default = "915632791698.dkr.ecr.us-east-2.amazonaws.com"
+//     default = "979895001312.dkr.ecr.us-east-1.amazonaws.com"
 // }
 
 // variable "ECR_REPOSITORY" {
-//     default = "kinnontest/harnessbuild"
-// }
+//     default = "alpine-linux-test"
+/}
+
+
+variable "ONBUILD_BASE_TAG" {
+    default = "alpine"
+}
+
+variable "ECR_REGISTRY" {
+    default = "915632791698.dkr.ecr.us-east-2.amazonaws.com"
+}
+
+variable "ECR_REPOSITORY" {
+     default = "kinnontest/harnessbuild"
+}
 
 // AWS S3 Cache variables
 variable "S3_BUCKET" {
