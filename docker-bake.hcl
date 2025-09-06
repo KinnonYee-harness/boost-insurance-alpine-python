@@ -116,7 +116,7 @@ target "image" {
 }
 
 target "image-local" {
-  inherits = ["args", "image", "docker-metadata-action"]
+  inherits = ["args", "image"]
   output = ["type=docker"]
 }
 
