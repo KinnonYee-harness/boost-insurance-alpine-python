@@ -111,6 +111,7 @@ group "default" {
 }
 
 target "image" {
+  inherits = ["args", "docker-metadata-action"]
   cache-to   = ["type=s3,bucket=${S3_BUCKET},region=${AWS_REGION},access_key_id=${AWS_ACCESS_KEY_ID},secret_access_key=${AWS_SECRET_ACCESS_KEY},session_token=${AWS_SESSION_TOKEN},mode=max"]
   cache-from = ["type=s3,bucket=${S3_BUCKET},region=${AWS_REGION},access_key_id=${AWS_ACCESS_KEY_ID},secret_access_key=${AWS_SECRET_ACCESS_KEY},session_token=${AWS_SESSION_TOKEN}"]
 }
