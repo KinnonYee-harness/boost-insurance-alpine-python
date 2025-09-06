@@ -1,22 +1,28 @@
+// Get environment variables for AWS caching
+function "getenv" {
+  params = [name, default]
+  result = notequal(getenv(name), "") ? getenv(name) : default
+}
+
 // AWS S3 cache configuration
 variable "S3_BUCKET" {
-  default = ""
+  default = getenv("S3_BUCKET", "")
 }
 
 variable "AWS_REGION" {
-  default = ""
+  default = getenv("AWS_REGION", "")
 }
 
 variable "AWS_ACCESS_KEY_ID" {
-  default = ""
+  default = getenv("AWS_ACCESS_KEY_ID", "")
 }
 
 variable "AWS_SECRET_ACCESS_KEY" {
-  default = ""
+  default = getenv("AWS_SECRET_ACCESS_KEY", "")
 }
 
 variable "AWS_SESSION_TOKEN" {
-  default = ""
+  default = getenv("AWS_SESSION_TOKEN", "")
 }
 
 
@@ -111,10 +117,25 @@ group "default" {
   targets = ["image-local", "onbuild-local", "onbuild-poetry-local"]
 }
 
+function "has_s3_config" {
+  params = []
+  result = notequal(getenv("S3_BUCKET", ""), "") && notequal(getenv("AWS_REGION", ""), "") ? true : false
+}
+
+function "s3_cache_to" {
+  params = []
+  result = has_s3_config() ? ["type=s3,bucket=${S3_BUCKET},region=${AWS_REGION},access_key_id=${AWS_ACCESS_KEY_ID},secret_access_key=${AWS_SECRET_ACCESS_KEY},session_token=${AWS_SESSION_TOKEN},mode=max"] : []
+}
+
+function "s3_cache_from" {
+  params = []
+  result = has_s3_config() ? ["type=s3,bucket=${S3_BUCKET},region=${AWS_REGION},access_key_id=${AWS_ACCESS_KEY_ID},secret_access_key=${AWS_SECRET_ACCESS_KEY},session_token=${AWS_SESSION_TOKEN}"] : []
+}
+
 target "image" {
   inherits = ["args", "docker-metadata-action"]
-    cache-to   = ["type=s3,bucket=${S3_BUCKET},region=${AWS_REGION},access_key_id=${AWS_ACCESS_KEY_ID},secret_access_key=${AWS_SECRET_ACCESS_KEY},session_token=${AWS_SESSION_TOKEN},mode=max"]
-    cache-from = ["type=s3,bucket=${S3_BUCKET},region=${AWS_REGION},access_key_id=${AWS_ACCESS_KEY_ID},secret_access_key=${AWS_SECRET_ACCESS_KEY},session_token=${AWS_SESSION_TOKEN}"]
+  cache-to   = s3_cache_to()
+  cache-from = s3_cache_from()
 }
 
 target "image-local" {
