@@ -127,7 +127,7 @@ target "docker-metadata-action" {
 }
 
 group "default" {
-  targets = ["image-local", "onbuild-local"]
+  targets = ["image-local"]
 }
 
 target "image" {
@@ -165,12 +165,12 @@ target "onbuild" {
 //   dockerfile = "Dockerfile.onbuild-poetry"
 // }
 
-target "onbuild-local" {
-  tags = ["alpine-onbuild:local-onbuild"]
-  inherits = ["onbuild-args"]
-  dockerfile = "Dockerfile.onbuild"
-  output = ["type=docker"]
-}
+// target "onbuild-local" {
+//   tags = ["alpine-onbuild:local-onbuild"]
+//   inherits = ["onbuild-args"]
+//   dockerfile = "Dockerfile.onbuild"
+//   output = ["type=docker"]
+// }
 
 // target "onbuild-poetry-local" {
 //   tags = ["alpine-onbuild:local-onbuild-poetry"]
