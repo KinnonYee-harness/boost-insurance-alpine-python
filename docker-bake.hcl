@@ -28,25 +28,12 @@ variable "ONBUILD_BASE_TAG" {
 }
 
 variable "ECR_REGISTRY" {
-    default = "979895001312.dkr.ecr.us-east-1.amazonaws.com"
-}
-
-variable "ECR_REPOSITORY" {
-    default = "alpine-linux-test"
-}
-
-variable "PUSH_ONBUILD_BASE_TAG" {
-    default = "3.9"
-}
-
-variable "PUSH_ECR_REGISTRY" {
     default = "915632791698.dkr.ecr.us-east-2.amazonaws.com"
 }
 
-variable "PUSH_ECR_REPOSITORY" {
+variable "ECR_REPOSITORY" {
     default = "kinnontest/harnessbuild"
 }
-
 
 // AWS S3 Cache variables
 variable "S3_BUCKET" {
@@ -84,9 +71,9 @@ target "onbuild-args" {
 
 target "onpush-args" {
     args = {
-        BASE_TAG = PUSH_ONBUILD_BASE_TAG
-        ECR_REGISTRY = PUSH_ECR_REGISTRY
-        ECR_REPOSITORY = PUSH_ECR_REPOSITORY
+        BASE_TAG = ONBUILD_BASE_TAG
+        ECR_REGISTRY = ECR_REGISTRY
+        ECR_REPOSITORY = ECR_REPOSITORY
     }
 }
 
@@ -156,7 +143,7 @@ target "image-all" {
 }
 
 target "onbuild" {
-  inherits = ["onpush-args", "platforms", "docker-metadata-action"]
+  inherits = ["onbuild-args", "platforms", "docker-metadata-action"]
   dockerfile = "Dockerfile.onbuild"
 }
 
@@ -167,7 +154,7 @@ target "onbuild-poetry" {
 
 target "onbuild-local" {
   tags = ["alpine-onbuild:local-onbuild"]
-  inherits = ["onpush-args"]
+  inherits = ["onbuild-args"]
   dockerfile = "Dockerfile.onbuild"
   output = ["type=docker"]
 }
