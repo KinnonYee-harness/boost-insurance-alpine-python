@@ -82,7 +82,7 @@ target "amd64" {
 
 // Special target: https://github.com/docker/metadata-action#bake-definition
 target "docker-metadata-action" {
-  tags = ["kinnontest/harnessbuild:local"]
+  tags = ["915632791698.dkr.ecr.us-east-2.amazonaws.com/kinnontest/harnessbuild:local"]
 }
 
 group "default" {
