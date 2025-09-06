@@ -127,7 +127,7 @@ target "docker-metadata-action" {
 }
 
 group "default" {
-  targets = ["image-local", "onbuild-local", "onbuild-poetry-local"]
+  targets = ["image-local", "onbuild-local"]
 }
 
 target "image" {
