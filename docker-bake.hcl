@@ -89,27 +89,13 @@ group "default" {
   targets = ["image-local", "onbuild-local", "onbuild-poetry-local"]
 }
 
-target "aws-creds" {
-  args = {
-    S3_BUCKET = S3_BUCKET
-    AWS_REGION = AWS_REGION
-    AWS_ACCESS_KEY_ID = AWS_ACCESS_KEY_ID
-    AWS_SECRET_ACCESS_KEY = AWS_SECRET_ACCESS_KEY
-    AWS_SESSION_TOKEN = AWS_SESSION_TOKEN
-  }
-}
-
-target "cache-s3" {
-  cache-to   = ["type=s3,bucket=${aws-creds.args.S3_BUCKET},region=${aws-creds.args.AWS_REGION},access_key_id=${aws-creds.args.AWS_ACCESS_KEY_ID},secret_access_key=${aws-creds.args.AWS_SECRET_ACCESS_KEY},session_token=${aws-creds.args.AWS_SESSION_TOKEN},mode=max"]
-  cache-from = ["type=s3,bucket=${aws-creds.args.S3_BUCKET},region=${aws-creds.args.AWS_REGION},access_key_id=${aws-creds.args.AWS_ACCESS_KEY_ID},secret_access_key=${aws-creds.args.AWS_SECRET_ACCESS_KEY},session_token=${aws-creds.args.AWS_SESSION_TOKEN}"]
-}
-
 target "image" {
-  inherits = ["args", "docker-metadata-action", "cache-s3"]
+  cache-to   = ["type=s3,bucket=${S3_BUCKET},region=${AWS_REGION},access_key_id=${AWS_ACCESS_KEY_ID},secret_access_key=${AWS_SECRET_ACCESS_KEY},session_token=${AWS_SESSION_TOKEN},mode=max"]
+  cache-from = ["type=s3,bucket=${S3_BUCKET},region=${AWS_REGION},access_key_id=${AWS_ACCESS_KEY_ID},secret_access_key=${AWS_SECRET_ACCESS_KEY},session_token=${AWS_SESSION_TOKEN}"]
 }
 
 target "image-local" {
-  inherits = ["args","image"]
+  inherits = ["args", "image", "docker-metadata-action"]
   output = ["type=docker"]
 }
 
