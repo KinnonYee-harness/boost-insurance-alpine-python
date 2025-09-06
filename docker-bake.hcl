@@ -160,10 +160,10 @@ target "onbuild" {
   dockerfile = "Dockerfile.onbuild"
 }
 
-target "onbuild-poetry" {
-  inherits = ["onbuild-args", "platforms", "docker-metadata-action"]
-  dockerfile = "Dockerfile.onbuild-poetry"
-}
+// target "onbuild-poetry" {
+//   inherits = ["onbuild-args", "platforms", "docker-metadata-action"]
+//   dockerfile = "Dockerfile.onbuild-poetry"
+// }
 
 target "onbuild-local" {
   tags = ["alpine-onbuild:local-onbuild"]
@@ -172,10 +172,10 @@ target "onbuild-local" {
   output = ["type=docker"]
 }
 
-target "onbuild-poetry-local" {
-  tags = ["alpine-onbuild:local-onbuild-poetry"]
-  inherits = ["onbuild-args"]
-  dockerfile = "Dockerfile.onbuild-poetry"
-  output = ["type=docker"]
-}
+// target "onbuild-poetry-local" {
+//   tags = ["alpine-onbuild:local-onbuild-poetry"]
+//   inherits = ["onbuild-args"]
+//   dockerfile = "Dockerfile.onbuild-poetry"
+//   output = ["type=docker"]
+// }
 
