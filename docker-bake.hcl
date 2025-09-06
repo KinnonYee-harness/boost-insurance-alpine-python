@@ -24,7 +24,7 @@ variable "PYTHON_GET_PIP_SHA256" {
 }
 
 variable "ONBUILD_BASE_TAG" {
-    default = "3.9"
+    default = "alpine"
 }
 
 variable "ECR_REGISTRY" {
@@ -37,6 +37,27 @@ variable "ECR_REPOSITORY" {
 
 variable "GHCR_SLUG" {
   default = "ghcr.io/KinnonYee-harness/bst-exmpl"
+}
+
+// AWS S3 Cache variables
+variable "S3_BUCKET" {
+  default = ""
+}
+
+variable "AWS_REGION" {
+  default = ""
+}
+
+variable "AWS_ACCESS_KEY_ID" {
+  default = ""
+}
+
+variable "AWS_SECRET_ACCESS_KEY" {
+  default = ""
+}
+
+variable "AWS_SESSION_TOKEN" {
+  default = ""
 }
 
 
@@ -82,7 +103,7 @@ target "amd64" {
 
 // Special target: https://github.com/docker/metadata-action#bake-definition
 target "docker-metadata-action" {
-  tags = ["alpine-python:local"]
+  tags = ["915632791698.dkr.ecr.us-east-2.amazonaws.com/kinnontest/harnessbuild:local"]
 }
 
 group "default" {
@@ -96,7 +117,7 @@ target "image" {
 }
 
 target "image-local" {
-  inherits = ["args","image"]
+  inherits = ["args", "image"]
   output = ["type=docker"]
 }
 
