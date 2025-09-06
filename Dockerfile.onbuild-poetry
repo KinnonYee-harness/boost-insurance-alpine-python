@@ -19,7 +19,7 @@ RUN apk add --no-cache gcc g++ linux-headers libffi-dev \
     bash libstdc++ gobject-introspection-dev \
     pkgconf
     
-RUN pip install poetry
+RUN curl -sSL https://install.python-poetry.org | python3 -
 
 RUN addgroup -S -g 1000 ${USER} && adduser -S -D -h /app -u 1000 -G ${USER} ${USER}
 
