@@ -89,9 +89,29 @@ group "default" {
   targets = ["image-local", "onbuild-local", "onbuild-poetry-local"]
 }
 
+variable "S3_BUCKET" {
+  default = env("S3_BUCKET")
+}
+
+variable "AWS_REGION" {
+  default = env("AWS_REGION")
+}
+
+variable "AWS_ACCESS_KEY_ID" {
+  default = env("AWS_ACCESS_KEY_ID")
+}
+
+variable "AWS_SECRET_ACCESS_KEY" {
+  default = env("AWS_SECRET_ACCESS_KEY")
+}
+
+variable "AWS_SESSION_TOKEN" {
+  default = env("AWS_SESSION_TOKEN")
+}
+
 target "cache-s3" {
-  cache-to   = ["type=s3,bucket=$S3_BUCKET,region=$AWS_REGION,access_key_id=$AWS_ACCESS_KEY_ID,secret_access_key=$AWS_SECRET_ACCESS_KEY,session_token=$AWS_SESSION_TOKEN,mode=max"]
-  cache-from = ["type=s3,bucket=$S3_BUCKET,region=$AWS_REGION,access_key_id=$AWS_ACCESS_KEY_ID,secret_access_key=$AWS_SECRET_ACCESS_KEY,session_token=$AWS_SESSION_TOKEN"]
+  cache-to   = ["type=s3,bucket=${var.S3_BUCKET},region=${var.AWS_REGION},access_key_id=${var.AWS_ACCESS_KEY_ID},secret_access_key=${var.AWS_SECRET_ACCESS_KEY},session_token=${var.AWS_SESSION_TOKEN},mode=max"]
+  cache-from = ["type=s3,bucket=${var.S3_BUCKET},region=${var.AWS_REGION},access_key_id=${var.AWS_ACCESS_KEY_ID},secret_access_key=${var.AWS_SECRET_ACCESS_KEY},session_token=${var.AWS_SESSION_TOKEN}"]
 }
 
 target "image" {
